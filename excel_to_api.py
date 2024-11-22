@@ -1,9 +1,18 @@
 from flask import Flask, jsonify
 import pandas as pd
 import os
-import uuid
+import requests
+import threading
+import time
+
 
 app = Flask(__name__)
+
+#--This is the backend dummy server for retrieving onboarding details
+Onboarded_URL_Server = 'http://localhost:5002/onboard'
+
+#--This is the backend dummy server for retrieving bank-details
+Bank_URL_SERVER = 'http://localhost:5003'
 
 # Define allowed Excel file extensions
 ALLOWED_EXTENSIONS = {'.xlsx', '.xls'}
@@ -151,7 +160,34 @@ def get_all_data_by_id(applicant_id):
         "isDirectorDueMissedLast12Months": directors_data['Any Dues Missed in Last 12 Months'] == 'Yes',
         "isDirectorDueMissedLast18Months": directors_data['Any Dues Missed in Last 18 Months'] == 'Yes'
     }
+    try:
+        # Send data to another server
+        response = requests.post(
+            Onboarded_URL_Server, 
+            json=all_data,
+            headers={'Content-Type': 'application/json'}
+        )
+        
+        # Check the response from the target server
+        if response.status_code != 200:
+            # Log the error or handle it as needed
+            print(f"Failed to send data to target server. Status: {response.status_code}")
+            # You might want to return a warning, but still return the original data
+            return jsonify({
+                'data': all_data,
+                'warning': 'Failed to send data to target server'
+            }), 206  # Partial Content status
+    
+    except requests.exceptions.RequestException as e:
+        # Log network errors
+        print(f"Network error when sending data: {e}")
+        return jsonify({
+            'data': all_data,
+            'error': 'Failed to send data to target server'
+        }), 206  # Partial Content status
     return jsonify(all_data), 200
+
+    
 
 # API endpoint for applicant data
 @app.route('/applicant-data', methods=['GET'])
@@ -179,21 +215,52 @@ def get_directors_data():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     
-# API endpoint for bank data
 @app.route('/bank-data/<string:applicant_id>', methods=['GET'])
 def get_bank_data_by_id(applicant_id):
     file_path = 'sample_excel_api.xlsx'
     if not os.path.exists(file_path):
         return jsonify({'error': 'File not found'}), 404
+    
     try:
         df = read_excel_sheet(file_path, 'Bank_Data')
         applicant_df = df[df['Applicant id'] == applicant_id]
         if applicant_df.empty:
             return jsonify({'error': 'Applicant bank data not found'}), 404
-        data = [normalize_bank_data(row) for index, row in applicant_df.iterrows()]
-        return jsonify(data), 200
+        
+        # Normalize bank data
+        bank_data = [normalize_bank_data(row) for index, row in applicant_df.iterrows()]
+        
+        # Send data to target server
+        try:
+            response = requests.post(
+                Bank_URL_SERVER + '/bank-details', 
+                json={
+                    'applicant_id': applicant_id,
+                    'bank_details': bank_data
+                },
+                headers={'Content-Type': 'application/json'}
+            )
+            
+            if response.status_code != 200:
+                print(f"Failed to send bank data to target server. Status: {response.status_code}")
+                return jsonify({
+                    'data': bank_data,
+                    'warning': 'Failed to send data to target server'
+                }), 206
+        
+        except requests.exceptions.RequestException as e:
+            print(f"Network error when sending bank data: {e}")
+            return jsonify({
+                'data': bank_data,
+                'error': 'Failed to send data to target server'
+            }), 206
+        
+        return jsonify(bank_data), 200
+    
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
 
 if __name__ == '__main__':
     app.run(port=5001,debug=True)
