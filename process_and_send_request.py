@@ -88,7 +88,7 @@ def receive_partial_application():
             target_response = forward_to_target_server(processed_payload)
             
             # Store the application ID
-            application_ids[session_id] = target_response.get('applicationId')
+            application_ids[session_id] = target_response.get('ApplicantId')
             
             # Clear the payload store for this session
             del payload_store[session_id]
@@ -98,7 +98,8 @@ def receive_partial_application():
                 "status": "success",
                 "message": "Complete application received and forwarded",
                 "processedPayload": processed_payload,
-                "targetResponse": target_response
+                "targetResponse": target_response,
+                "ApplicantId": application_ids
             }), 200
         else:
             # Not all parts received yet
@@ -121,7 +122,7 @@ def forward_to_target_server(payload):
     """
     try:
         # Replace with your actual target server URL
-        target_url = 'https://5d49-14-99-167-142.ngrok-free.app/receive-partial-application'  # Use httpbin for testing
+        target_url = 'https://3228-2401-4900-8838-9963-bdb9-6092-94a4-defb.ngrok-free.app/receive-partial-application'  # Use httpbin for testing
         
         # Set up headers
         headers = {
@@ -141,10 +142,10 @@ def forward_to_target_server(payload):
         # Check response
         response.raise_for_status()
         
-        logger.info(f"Successfully forwarded request to {target_url}")
-        logger.info(f"Response Status: {response.status_code}")
-        
-        return response.json()
+        # Parse and return JSON response
+        response_json = response.json()
+        logger.info(f"Response JSON: {json.dumps(response_json, indent=2)}")
+        return response_json
     
     except requests.RequestException as e:
         logger.error(f"Error forwarding request: {e}")
@@ -174,43 +175,49 @@ def receive_kyc_details():
                     "message": f"Missing required field: {field}"
                 }), 400
         
-        # Forward to target server with application ID in URL
-        target_url = 'https://mock-51e439ddcad24fc78831c096a2513df0.mock.insomnia.rest/onboard-kyc'
-
-        
+        # Forward to target server
+        target_url = 'https://3228-2401-4900-8838-9963-bdb9-6092-94a4-defb.ngrok-free.app/onboard-kyc'
         headers = {'Content-Type': 'application/json'}
         payload_json = json.dumps(payload)
         
         try:
+            # Send the request
             response = requests.post(target_url, data=payload_json, headers=headers)
-            response.raise_for_status()
+            response.raise_for_status()  # Raise exception for HTTP errors
             
-            # Extract the response from the target server
+            # Parse the response JSON
             response_data = response.json()
             transaction_id = response_data.get("TransactionId")
             applicant_id = response_data.get("ApplicantId")
             
-            # Store in the temporary dictionary
+            # Log and store the transaction ID
             if transaction_id and applicant_id:
                 kyc_transactions[applicant_id] = transaction_id
+                logger.info(f"Stored Transaction ID: {transaction_id} for Applicant ID: {applicant_id}")
             
+            # Return success response
             return jsonify({
                 "status": "success",
                 "message": "KYC details forwarded successfully",
+                "TransactionId": transaction_id,  # Include TransactionId
+                "ApplicantId": applicant_id,
                 "targetResponse": response_data
             }), 200
         
         except requests.RequestException as e:
+            logger.error(f"Failed to forward KYC request: {e}")
             return jsonify({
                 "status": "error",
                 "message": f"Failed to forward KYC request: {str(e)}"
             }), 500
     
     except Exception as e:
+        logger.error(f"Error in /receive-kyc-details: {e}")
         return jsonify({
             "status": "error",
             "message": str(e)
         }), 400
+
         
 if __name__ == '__main__':
     # Run the Flask app
